@@ -1,5 +1,5 @@
-
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 import '../database/database_helper.dart';
 import '../models/budget.dart';
@@ -22,6 +22,17 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
 
   bool _isLoading = true;
 
+  final List<Color> _chartColors = [
+    const Color(0xFF854C30),
+    const Color(0xFFB17A56),
+    const Color(0xFFD6A783),
+    const Color(0xFF684333),
+    const Color(0xFFE0C3A5),
+    const Color(0xFF9C7056),
+    const Color(0xFFC49A7A),
+    const Color(0xFF553729),
+  ];
+
   String get _monthKey =>
       '${_selectedMonth.year}-'
       '${_selectedMonth.month.toString().padLeft(2, '0')}';
@@ -34,14 +45,13 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
 
   Future<void> _loadData() async {
     try {
-      final categories =
-          await DatabaseHelper.instance.getCategories();
+      final categories = await DatabaseHelper.instance.getCategories();
 
-      final budgets =
-          await DatabaseHelper.instance.getBudgetsForMonth(_monthKey);
+      final budgets = await DatabaseHelper.instance.getBudgetsForMonth(
+        _monthKey,
+      );
 
-      final transactions =
-          await DatabaseHelper.instance.getTransactions();
+      final transactions = await DatabaseHelper.instance.getTransactions();
 
       if (!mounted) return;
 
@@ -53,11 +63,11 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+
       setState(() => _isLoading = false);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading budgets: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Error loading budgets: $e')));
     }
   }
 
@@ -82,9 +92,18 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
 
   String _monthName() {
     const months = [
-      'January', 'February', 'March', 'April',
-      'May', 'June', 'July', 'August',
-      'September', 'October', 'November', 'December'
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
     ];
 
     return '${months[_selectedMonth.month - 1]} ${_selectedMonth.year}';
@@ -92,106 +111,236 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
 
   double _totalIncome() {
     return _transactions
-        .where((t) =>
-            t.type == 'Income' &&
-            t.date.year == _selectedMonth.year &&
-            t.date.month == _selectedMonth.month)
+        .where(
+          (t) =>
+              t.type == 'Income' &&
+              t.date.year == _selectedMonth.year &&
+              t.date.month == _selectedMonth.month,
+        )
         .fold(0.0, (sum, t) => sum + t.amount);
   }
 
   double _totalExpenses() {
     return _transactions
-        .where((t) =>
-            t.type == 'Expense' &&
-            t.date.year == _selectedMonth.year &&
-            t.date.month == _selectedMonth.month)
+        .where(
+          (t) =>
+              t.type == 'Expense' &&
+              t.date.year == _selectedMonth.year &&
+              t.date.month == _selectedMonth.month,
+        )
         .fold(0.0, (sum, t) => sum + t.amount);
   }
 
   double _spentForCategory(int categoryId) {
     return _transactions
-        .where((t) =>
-            t.type == 'Expense' &&
-            t.categoryId == categoryId &&
-            t.date.year == _selectedMonth.year &&
-            t.date.month == _selectedMonth.month)
+        .where(
+          (t) =>
+              t.type == 'Expense' &&
+              t.categoryId == categoryId &&
+              t.date.year == _selectedMonth.year &&
+              t.date.month == _selectedMonth.month,
+        )
         .fold(0.0, (sum, t) => sum + t.amount);
   }
 
-  Future<void> _setBudget(CategoryModel category) async {
-    final controller = TextEditingController();
+  // Donut chart for monthly category spending.
+  Widget _spendingChart(List<CategoryModel> expenseCategories) {
+    final spendingData = expenseCategories
+        .where((category) => category.id != null)
+        .map(
+          (category) =>
+              MapEntry(category.name, _spentForCategory(category.id!)),
+        )
+        .where((entry) => entry.value > 0)
+        .toList();
 
-    final existing = _budgets.where(
-      (b) => b.categoryId == category.id,
-    );
+    spendingData.sort((a, b) => b.value.compareTo(a.value));
 
-    if (existing.isNotEmpty) {
-      controller.text = existing.first.amount.toString();
+    if (spendingData.isEmpty) {
+      return Card(
+        color: Colors.white,
+        child: Padding(
+          padding: const EdgeInsets.all(25),
+          child: Column(
+            children: [
+              Icon(
+                Icons.pie_chart_outline,
+                size: 55,
+                color: Colors.brown.shade300,
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'No expenses to display yet.',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
-    final formKey = GlobalKey<FormState>();
+    final totalSpending = spendingData.fold(
+      0.0,
+      (sum, entry) => sum + entry.value,
+    );
+
+    final sections = spendingData.asMap().entries.map((item) {
+      final index = item.key;
+      final entry = item.value;
+
+      final percentage = (entry.value / totalSpending) * 100;
+
+      return PieChartSectionData(
+        value: entry.value,
+        color: _chartColors[index % _chartColors.length],
+        radius: 55,
+        title: '${percentage.toStringAsFixed(0)}%',
+        titleStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      );
+    }).toList();
+
+    return Card(
+      color: Colors.white,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Expense Breakdown',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF4A3025),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 15),
+
+            SizedBox(
+              height: 220,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  PieChart(
+                    PieChartData(
+                      sections: sections,
+                      centerSpaceRadius: 48,
+                      sectionsSpace: 3,
+                      startDegreeOffset: -90,
+                      pieTouchData: PieTouchData(enabled: false),
+                    ),
+                  ),
+
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Total Spent',
+                        style: TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        'Rs. ${totalSpending.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF4A3025),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 15),
+
+            const Divider(),
+
+            const SizedBox(height: 10),
+
+            ...spendingData.asMap().entries.map((item) {
+              final index = item.key;
+              final entry = item.value;
+
+              final percentage = (entry.value / totalSpending) * 100;
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 13,
+                      height: 13,
+                      decoration: BoxDecoration(
+                        color: _chartColors[index % _chartColors.length],
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+
+                    const SizedBox(width: 10),
+
+                    Expanded(
+                      child: Text(
+                        entry.key,
+                        style: const TextStyle(fontWeight: FontWeight.w500),
+                      ),
+                    ),
+
+                    Text(
+                      '${percentage.toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+
+                    const SizedBox(width: 12),
+
+                    Text(
+                      'Rs. ${entry.value.toStringAsFixed(0)}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF4A3025),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setBudget(CategoryModel category) async {
+    final existing = _budgets.where((b) => b.categoryId == category.id);
+
+    final initialAmount = existing.isNotEmpty ? existing.first.amount : null;
 
     final amount = await showDialog<double>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          title: Text('${category.name} Budget'),
-          content: Form(
-            key: formKey,
-            child: TextFormField(
-              controller: controller,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                labelText: 'Monthly budget',
-                prefixText: 'Rs. ',
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) {
-                final number = double.tryParse(value ?? '');
-
-                if (number == null ||
-                    !number.isFinite ||
-                    number <= 0) {
-                  return 'Enter an amount greater than zero';
-                }
-
-                return null;
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.pop(
-                    dialogContext,
-                    double.parse(controller.text.trim()),
-                  );
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
+        return BudgetAmountDialog(
+          categoryName: category.name,
+          initialAmount: initialAmount,
         );
       },
     );
 
-    controller.dispose();
-
-    if (amount == null || category.id == null) return;
+    if (amount == null || category.id == null || !mounted) return;
 
     try {
       await DatabaseHelper.instance.saveBudget(
-        BudgetModel(
-          categoryId: category.id!,
-          month: _monthKey,
-          amount: amount,
-        ),
+        BudgetModel(categoryId: category.id!, month: _monthKey, amount: amount),
       );
 
       await _loadData();
@@ -204,9 +353,8 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not save budget: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Could not save budget: $e')));
     }
   }
 
@@ -240,8 +388,9 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
     final expenses = _totalExpenses();
     final balance = income - expenses;
 
-    final expenseCategories =
-        _categories.where((c) => c.type == 'Expense').toList();
+    final expenseCategories = _categories
+        .where((c) => c.type == 'Expense')
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -257,6 +406,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
           ),
         ],
       ),
+
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -272,6 +422,7 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                       color: Color(0xFF4A3025),
                     ),
                   ),
+
                   const SizedBox(height: 15),
 
                   _summaryCard('Total Income', income),
@@ -281,11 +432,19 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                   const SizedBox(height: 20),
 
                   const Text(
+                    'Spending by Category',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  _spendingChart(expenseCategories),
+
+                  const SizedBox(height: 20),
+
+                  const Text(
                     'Category Budgets',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                   ),
 
                   const SizedBox(height: 10),
@@ -343,30 +502,33 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                                 ),
                               ],
                             ),
-                            Text(
-                              'Budget: Rs. ${budget.toStringAsFixed(2)}',
-                            ),
+
+                            Text('Budget: Rs. ${budget.toStringAsFixed(2)}'),
+
                             const SizedBox(height: 6),
-                            Text(
-                              'Spent: Rs. ${spent.toStringAsFixed(2)}',
-                            ),
+
+                            Text('Spent: Rs. ${spent.toStringAsFixed(2)}'),
+
                             const SizedBox(height: 6),
+
                             Text(
                               budget == 0
                                   ? 'Set a budget to track spending'
                                   : remaining >= 0
-                                      ? 'Remaining: Rs. ${remaining.toStringAsFixed(2)}'
-                                      : 'Over budget by: Rs. ${(-remaining).toStringAsFixed(2)}',
+                                  ? 'Remaining: Rs. ${remaining.toStringAsFixed(2)}'
+                                  : 'Over budget by: Rs. ${(-remaining).toStringAsFixed(2)}',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: budget == 0
                                     ? Colors.grey
                                     : remaining < 0
-                                        ? Colors.red
-                                        : Colors.green,
+                                    ? Colors.red
+                                    : Colors.green,
                               ),
                             ),
+
                             const SizedBox(height: 10),
+
                             LinearProgressIndicator(
                               value: progress,
                               minHeight: 8,
@@ -383,6 +545,82 @@ class _BudgetsScreenState extends State<BudgetsScreen> {
                 ],
               ),
             ),
+    );
+  }
+}
+
+class BudgetAmountDialog extends StatefulWidget {
+  final String categoryName;
+  final double? initialAmount;
+
+  const BudgetAmountDialog({
+    super.key,
+    required this.categoryName,
+    this.initialAmount,
+  });
+
+  @override
+  State<BudgetAmountDialog> createState() => _BudgetAmountDialogState();
+}
+
+class _BudgetAmountDialogState extends State<BudgetAmountDialog> {
+  late final TextEditingController _controller;
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void initState() {
+    super.initState();
+
+    _controller = TextEditingController(
+      text: widget.initialAmount?.toString() ?? '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _saveBudget() {
+    if (_formKey.currentState!.validate()) {
+      final amount = double.parse(_controller.text.trim());
+      Navigator.pop(context, amount);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('${widget.categoryName} Budget'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          controller: _controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Monthly budget',
+            prefixText: 'Rs. ',
+            border: OutlineInputBorder(),
+          ),
+          validator: (value) {
+            final number = double.tryParse(value ?? '');
+
+            if (number == null || !number.isFinite || number <= 0) {
+              return 'Enter an amount greater than zero';
+            }
+
+            return null;
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(onPressed: _saveBudget, child: const Text('Save')),
+      ],
     );
   }
 }

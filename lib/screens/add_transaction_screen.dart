@@ -237,7 +237,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<String>(
-                      value: _type,
+                      initialValue: _type,
                       decoration: const InputDecoration(
                         border: OutlineInputBorder(),
                         filled: true,
@@ -324,7 +324,7 @@ class _AddTransactionScreenState extends State<AddTransactionScreen> {
                     ),
                     const SizedBox(height: 10),
                     DropdownButtonFormField<int>(
-                      value: availableCategories.any(
+                      initialValue: availableCategories.any(
                         (c) => c.id == _selectedCategoryId,
                       )
                           ? _selectedCategoryId
